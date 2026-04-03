@@ -1,22 +1,35 @@
+import asyncio
+
 import dotenv
 import os
 
-from supabase import create_client, Client
+from supabase import AsyncClient
 
 
-dotenv.load_dotenv()
-
-
-# Данные для подключения (получить в настройках Supabase)
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_PRIVATE_KEY")
-
-# Создание клиента
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+async def get_supabase_client() -> AsyncClient:
+    client: AsyncClient = await (AsyncClient(
+        os.getenv("SUPABASE_URL"),
+        os.getenv("SUPABASE_PRIVATE_KEY")
+    )).create(
+        os.getenv("SUPABASE_URL"),
+        os.getenv("SUPABASE_PRIVATE_KEY")
+    )
+    return client
 
 # Проверка подключения
-try:
-    response = supabase.table('User').select("*").limit(1).execute()
-    print("✅ Подключение успешно!")
-except Exception as e:
-    print(f"❌ Ошибка подключения: {e}")
+async def main():
+    try:
+        response = await ((await get_supabase_client()).table('User').select("*").limit(1)).execute()
+        print("✅ Подключение успешно!")
+    except Exception as e:
+        print(f"❌ Ошибка подключения: {e}")
+
+
+if __name__ == "__main__":
+    dotenv.load_dotenv()
+
+    # Данные для подключения (получить в настройках Supabase)
+    SUPABASE_URL = os.getenv("SUPABASE_URL")
+    SUPABASE_KEY = os.getenv("SUPABASE_PRIVATE_KEY")
+
+    asyncio.run(main())
