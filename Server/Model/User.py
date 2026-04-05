@@ -10,7 +10,7 @@ class Register(Base):
 class Login(Base):
     Login: str | None = None
     Password: str | None = None
-    RefreshToken: str | None = None
+    AccessToken: str | None = None
 
 
 class User(Base):
