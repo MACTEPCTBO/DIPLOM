@@ -8,11 +8,10 @@ import dotenv
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from starlette import status
-from supabase import AsyncClient
 
 from Server.Model.User import Register, Login, LoginResponse, RefreshToken, UserAuth
 from Server.engine import SessionDep
-from Server.setting import API
+from Player.setting import API
 
 user_router = APIRouter(prefix=f"{API}/user", tags=["User"])
 

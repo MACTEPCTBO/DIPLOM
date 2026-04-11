@@ -5,3 +5,4 @@ supabase
 dotenv
 pyside6
 mutagen
+yandex_music

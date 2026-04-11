@@ -1,12 +1,9 @@
-from urllib.error import HTTPError
-
 from fastapi import APIRouter, HTTPException
-from supabase import AsyncClient
 
 from Server.Model.Track import Track, Artist
 from Server.Router.User import UserDep
 from Server.engine import SessionDep
-from Server.setting import API, get_client_yandex
+from Player.setting import API, get_client_yandex
 
 track_router = APIRouter(prefix=f"{API}/track", tags=["Track"])
 
@@ -18,11 +15,12 @@ async def get_track(name: str, session: SessionDep, user: UserDep):
 
     track = await session.table("Track").select("*").eq("Name", name).execute()
     if track.data:
+        print(track.data)
         new_track = Track(
-            Id=track.data[0]['id'],
-            Name=track.data[0]["title"],
-            DurationMs=track.data[0]["duration_ms"],
-            Artists=track.data[0]["artists"],
+            Id=track.data[0]['Id'],
+            Name=track.data[0]["Name"],
+            DurationMs=track.data[0]["Duration_ms"],
+            Artists=track.data[0]["Artists"],
             Albums=0,
             URL=track.data[0]["URL"],
             URI=track.data[0]["URI"],

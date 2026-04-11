@@ -6,7 +6,7 @@ from fastapi import FastAPI
 
 from Server.Router.Track import track_router
 from Server.Router.User import user_router
-from Server.setting import IP, PORT
+from Player.setting import IP, PORT
 
 app = FastAPI()
 

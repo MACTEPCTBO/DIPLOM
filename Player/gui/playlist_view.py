@@ -18,7 +18,7 @@ class PlaylistView(QWidget):
         layout = QVBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
 
-        self.header = QLabel("<b>Текущий плейлист</b>")
+        self.header = QLabel("<b>🎵 Текущий плейлист</b>")
         layout.addWidget(self.header)
 
         self.tree = QTreeWidget()

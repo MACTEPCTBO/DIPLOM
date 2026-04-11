@@ -22,6 +22,7 @@ class CurrentTrackPanel(QWidget):
         self.cover_label.setAlignment(Qt.AlignCenter)
         self.cover_label.setStyleSheet("background-color: #333; border: 1px solid #555;")
         self.cover_label.setText("Обложка")
+        self.cover_label.setObjectName("coverLabel")
         main_layout.addWidget(self.cover_label, alignment=Qt.AlignCenter)
 
         self.title_label = QLabel("Нет трека")
