@@ -33,3 +33,7 @@ class LoginResponse(Base):
     AccessToken: str
     RefreshToken: str
 
+
+class UserAuth(Base):
+    Username: str
+    Id: int

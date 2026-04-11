@@ -1,15 +1,17 @@
 import hashlib
 import os
 from datetime import datetime, timedelta
+from typing import Annotated
+
 import jwt
-
 import dotenv
-
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from starlette import status
 from supabase import AsyncClient
 
-from Server.Model.User import Register, Login, LoginResponse, RefreshToken
-from Server.engine import get_supabase_client
+from Server.Model.User import Register, Login, LoginResponse, RefreshToken, UserAuth
+from Server.engine import SessionDep
 from Server.setting import API
 
 user_router = APIRouter(prefix=f"{API}/user", tags=["User"])
@@ -19,58 +21,66 @@ dotenv.load_dotenv()
 SECRET_KEY = os.getenv("SECRET_KEY")
 ALGORITHM = os.getenv("ALGORITHM")
 
+
 @user_router.post("/register")
-async def register(data: Register) -> bool:
-    session: AsyncClient = await get_supabase_client()
+async def register(
+    data: Register,
+    session: SessionDep
+) -> bool:
     try:
         user_data = {
             "Login": data.Login,
             "Password": data.Password,
             "Username": data.Username,
         }
-        await (session.table('User').insert(user_data)).execute()
-
+        await session.table('User').insert(user_data).execute()
         return True
-
     except Exception as err:
         print(err)
         return False
 
 
 @user_router.post("/login", response_model=LoginResponse)
-async def login(data: Login):
-    session = await get_supabase_client()
+async def login(
+    data: Login,
+    session: SessionDep
+):
+    # Если передан AccessToken, используем его для аутентификации
     if data.AccessToken is None:
-        # 1. Проверить логин/пароль в БД
-        user = await (session.table("User")
-                      .select("*")
-                      .eq("Login", data.Login)
-                      .eq("Password", data.Password)
-                      .execute())
+        # Проверка логина/пароля
+        user = await (
+            session.table("User")
+            .select("*")
+            .eq("Login", data.Login)
+            .eq("Password", data.Password)
+            .execute()
+        )
         if not user.data:
             raise HTTPException(status_code=401, detail="Invalid credentials")
-
         user_id = user.data[0]["Id"]
-
     else:
-        payload = jwt.decode(data.AccessToken, SECRET_KEY, algorithms=[ALGORITHM])
+        # Аутентификация по существующему AccessToken
+        try:
+            payload = jwt.decode(data.AccessToken, SECRET_KEY, algorithms=[ALGORITHM])
+        except jwt.PyJWTError:
+            raise HTTPException(status_code=401, detail="Invalid token")
 
         if payload["TimeLife"] < datetime.now().timestamp():
-            raise HTTPException(status_code=401, detail="Invalid credentials")
+            raise HTTPException(status_code=401, detail="Token expired")
 
-        user = await (session.table("User")
-                      .select("*")
-                      .eq("Id", payload["UserId"])
-                      .execute())
+        user = await (
+            session.table("User")
+            .select("*")
+            .eq("Id", payload["UserId"])
+            .execute()
+        )
         if not user.data:
-            raise HTTPException(status_code=401, detail="Invalid credentials")
-
+            raise HTTPException(status_code=401, detail="User not found")
         user_id = user.data[0]["Id"]
-        created_at = user.data[0]["Created_at"]
 
-    # 2. Создать новую пару токенов
-    access_token = await create_access_token(user_id)
-    refresh_token = await create_refresh_token(user_id)
+    # Создание новой пары токенов
+    access_token = create_access_token(user_id)
+    refresh_token = create_refresh_token(user_id)
     hash_ = hashlib.sha256(refresh_token.encode()).hexdigest()
 
     token_data = {
@@ -78,76 +88,117 @@ async def login(data: Login):
         "UserId": user_id,
         "HashToken": hash_
     }
-
-    await (session.table('RefreshToken').insert(token_data)).execute()
+    await session.table('RefreshToken').insert(token_data).execute()
 
     return LoginResponse(AccessToken=access_token, RefreshToken=refresh_token)
 
 
 @user_router.post("/refresh")
-async def refresh(data: RefreshToken):
-    session: AsyncClient = await get_supabase_client()
+async def refresh(
+    data: RefreshToken,
+    session: SessionDep
+):
     try:
         payload = jwt.decode(data.Token, SECRET_KEY, algorithms=[ALGORITHM])
-        if payload["TimeLife"] < datetime.now().timestamp():
-            return HTTPException(status_code=401, detail="Invalid credentials")
+    except jwt.PyJWTError:
+        raise HTTPException(status_code=401, detail="Invalid refresh token")
 
-        user = await (session.table("User")
-                .select("*")
-                .eq("Id", payload["UserId"])
-                ).execute()
+    if payload["TimeLife"] < datetime.now().timestamp():
+        raise HTTPException(status_code=401, detail="Refresh token expired")
 
-        if len(user.data):
-            access_token = await create_access_token(user.data[0]["Id"])
-            refresh_token = await create_refresh_token(user.data[0]["Id"])
+    user = await (
+        session.table("User")
+        .select("*")
+        .eq("Id", payload["UserId"])
+        .execute()
+    )
+    if not user.data:
+        raise HTTPException(status_code=401, detail="User not found")
 
-            old_token_hash = hashlib.sha256(data.Token.encode()).hexdigest()
-            new_token_hash = hashlib.sha256(refresh_token.encode()).hexdigest()
+    # Генерация новых токенов
+    new_access_token = create_access_token(user.data[0]["Id"])
+    new_refresh_token = create_refresh_token(user.data[0]["Id"])
 
-            # Вызываем хранимую процедуру
-            try:
-                result = await session.rpc(
-                    'rotate_refresh_token',
-                    {
-                        'p_old_token_hash': old_token_hash,
-                        'p_new_token': refresh_token,
-                        'p_user_id': user.data[0]["Id"],
-                        'p_new_token_hash': new_token_hash
-                    }
-                ).execute()
-                if result.data == False:
-                    return HTTPException(status_code=401, detail="Invalid credentials")
+    old_token_hash = hashlib.sha256(data.Token.encode()).hexdigest()
+    new_token_hash = hashlib.sha256(new_refresh_token.encode()).hexdigest()
 
-                return LoginResponse(AccessToken=access_token, RefreshToken=refresh_token)
-            except Exception as e:
-                print(f"Rotation failed: {e}")
-                return False
-        else:
-            return HTTPException(status_code=401, detail="The user was not found")
-
-
-    except Exception as err:
-        raise HTTPException(status_code=401, detail="Invalid credentials")
+    # Вызов хранимой процедуры для ротации refresh токена
+    try:
+        result = await session.rpc(
+            'rotate_refresh_token',
+            {
+                'p_old_token_hash': old_token_hash,
+                'p_new_token': new_refresh_token,
+                'p_user_id': user.data[0]["Id"],
+                'p_new_token_hash': new_token_hash
+            }
+        ).execute()
+        if not result.data:
+            raise HTTPException(status_code=401, detail="Invalid refresh token")
+        return LoginResponse(AccessToken=new_access_token, RefreshToken=new_refresh_token)
+    except Exception as e:
+        print(f"Rotation failed: {e}")
+        raise HTTPException(status_code=500, detail="Token rotation failed")
 
 
-
-async def create_access_token(id: int) -> str:
-    access_token = {
-        "UserId": id,
+# Синхронные вспомогательные функции (не требуют async)
+def create_access_token(user_id: int) -> str:
+    payload = {
+        "UserId": user_id,
         "TimeLife": (datetime.now() + timedelta(days=1)).timestamp()
     }
-    token_access = jwt.encode(access_token, SECRET_KEY, algorithm=ALGORITHM)
+    return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
-    return token_access
 
-async def create_refresh_token(id: int) -> str:
-    refresh_token = {
-        "UserId": id,
+def create_refresh_token(user_id: int) -> str:
+    payload = {
+        "UserId": user_id,
         "TimeLife": (datetime.now() + timedelta(days=31)).timestamp()
     }
-
-    token_refresh = jwt.encode(refresh_token, SECRET_KEY, algorithm=ALGORITHM)
-
+    return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
 
-    return token_refresh
+security = HTTPBearer()
+
+
+async def get_current_user(
+        session: SessionDep,
+        credentials: HTTPAuthorizationCredentials = Depends(security),
+
+)-> UserAuth:
+    token = credentials.credentials
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+    except jwt.PyJWTError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    if payload["TimeLife"] < datetime.now().timestamp():
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token expired",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    user_id = payload["UserId"]
+    user_result = await (
+        session.table("User")
+        .select("*")
+            .eq("Id", user_id)
+        .execute()
+    )
+    if not user_result.data:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Верните нужные вам данные о пользователе
+    return UserAuth(
+        Id=user_result.data[0]["Id"],
+        Username=user_result.data[0]["Username"],
+                    )
+
+
+# Теперь создаём тип зависимости
+UserDep = Annotated[UserAuth, Depends(get_current_user)]

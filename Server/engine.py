@@ -1,8 +1,10 @@
 import asyncio
+from typing import Annotated
 
 import dotenv
 import os
 
+from fastapi import Depends
 from supabase import AsyncClient
 
 
@@ -24,6 +26,8 @@ async def main():
     except Exception as e:
         print(f"❌ Ошибка подключения: {e}")
 
+
+SessionDep = Annotated[AsyncClient, Depends(get_supabase_client)]
 
 if __name__ == "__main__":
     dotenv.load_dotenv()

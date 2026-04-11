@@ -3,3 +3,5 @@ uvicorn
 pydantic
 supabase
 dotenv
+pyside6
+mutagen
