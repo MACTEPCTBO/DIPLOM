@@ -65,8 +65,8 @@ async def get_track_artist(data: Track, session: SessionDep, user: User = UserDe
 
 
 
-@track_router.post("/listen/{Id}")
-async def get_track_listen(Id: int, session: SessionDep, user: User = UserDep):
+@track_router.get("/listen/{Id}")
+async def get_track_listen(Id: int, session: SessionDep):
     # 1. Получаем трек
     track_result = await session.table("Track").select("*").eq("Id", Id).execute()
     if not track_result.data:
@@ -74,7 +74,7 @@ async def get_track_listen(Id: int, session: SessionDep, user: User = UserDep):
     track = track_result.data[0]  # словарь
 
     # 2. Получаем исполнителя
-    artist_result = await session.table("Artist").select("*").eq("YID", track["Artists"]).execute()
+    artist_result = await session.table("Artist").select("*").eq("YID", track["Artist"]).execute()
     if not artist_result.data:
         raise HTTPException(status_code=404, detail="Artist not found")
     artist = artist_result.data[0]
@@ -84,22 +84,19 @@ async def get_track_listen(Id: int, session: SessionDep, user: User = UserDep):
     #     raise HTTPException(status_code=403, detail="Premium track")
 
     # 4. Формируем безопасный путь к файлу
-    base_dir = Path("./Data/Track")
-    safe_path = base_dir / Path(track["Path"]).name
-    file_path = safe_path.with_suffix(".mp3")
-    if not file_path.exists():
+    safe_path = Path(track["Path"] + ".mp3")
+    if not safe_path.exists():
         raise HTTPException(status_code=404, detail="Audio file missing")
 
     # 5. Имя для скачивания
-    filename = f"{track['title']} - {artist['name']}.mp3"
+    filename = f"{track['Name']} - {artist['Name']}.mp3"
 
     return FileResponse(
-        path=file_path,
+        path=safe_path,
         media_type="audio/mpeg",
         filename=filename,
         headers={"Content-Disposition": "inline"}
     )
-
 
 @track_router.get("/{name}")
 async def get_track(name: str, session: SessionDep, user: UserDep):
@@ -128,7 +125,7 @@ async def get_track(name: str, session: SessionDep, user: UserDep):
                                            Albums=0,
                                            URL=(await track.get_download_info_async(get_direct_links=True))[
                                                0].direct_link,
-                                           URI=(track.get_og_image_url("50x50")),
+                                           URI=(track.get_og_image_url("300x300")),
                                            UserInfo=user.Id,
                                            Path="Data/Track/" + str(track.title) + " - " + str(
                                                track.artists[0].id) + " - " + str(
@@ -152,7 +149,7 @@ async def get_track(name: str, session: SessionDep, user: UserDep):
                                            Albums=0,
                                            URL=(await track.get_download_info_async(get_direct_links=True))[
                                                0].direct_link,
-                                           URI=(track.get_og_image_url("50x50")),
+                                           URI=(track.get_og_image_url("300x300")),
                                            UserInfo=user.Id,
                                            Path="Data/Track/" + str(track.title) + " - " + str(
                                                track.artists[0].id) + " - " + str(
@@ -162,6 +159,8 @@ async def get_track(name: str, session: SessionDep, user: UserDep):
                     track.artists[0].id) + " - " + str(
                     track.artists[0].name) + ".mp3")
 
+                return new_track
+
             except APIError as e:
                 print(e)
                 return Track()
@@ -169,6 +168,9 @@ async def get_track(name: str, session: SessionDep, user: UserDep):
 
 
             return new_track
+
+
+
 
 async def create_track(session: SessionDep = None, **kwargs) -> Track:
     """Создаёт трек для отправления пользователю.
