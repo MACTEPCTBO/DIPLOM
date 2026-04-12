@@ -11,7 +11,7 @@ from starlette import status
 
 from Server.Model.User import Register, Login, LoginResponse, RefreshToken, UserAuth
 from Server.engine import SessionDep
-from Player.setting import API
+from setting import API
 
 user_router = APIRouter(prefix=f"{API}/user", tags=["User"])
 

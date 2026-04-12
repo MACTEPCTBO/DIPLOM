@@ -25,3 +25,4 @@ class Track(Base):
     URL: str | None = None
     URI: str | None = None
     UserInfo: int | None = None
+    Path: str | None = None

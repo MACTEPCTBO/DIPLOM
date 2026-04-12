@@ -1,4 +1,6 @@
 import sys
+
+import dotenv
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import QFile, QTextStream
 from gui.main_window import MainWindow
@@ -19,4 +21,5 @@ def main():
 
 
 if __name__ == "__main__":
+    dotenv.load_dotenv()
     main()
