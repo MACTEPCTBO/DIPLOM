@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException
 from pip._internal.network import session
+from postgrest import APIError
 
 from Server.Model.Track import Track, Artist
 from Server.Model.User import User
@@ -64,165 +65,137 @@ async def get_track_artist(data: Track, session: SessionDep, user: User = UserDe
 
 
 
-@track_router.post("/listen")
-async def get_track_listen(
-        data: Track,
-        session: SessionDep,
-        user: User = UserDep
-):
-    try:
-        print(data)
-        # 1. Получаем информацию о треке из БД (пример)
-        track_info = await session.table("Track").select("*").eq("Id", data.Id).execute()
-        print(track_info)
-        artist = await (session.table("Artist")
-                        .select("*")
-                        .eq("YID", track_info.data[0]["Artists"])
-                        .execute())
-        if not track_info:
-            raise HTTPException(status_code=404, detail="Track not found")
+@track_router.post("/listen/{Id}")
+async def get_track_listen(Id: int, session: SessionDep, user: User = UserDep):
+    # 1. Получаем трек
+    track_result = await session.table("Track").select("*").eq("Id", Id).execute()
+    if not track_result.data:
+        raise HTTPException(status_code=404, detail="Track not found")
+    track = track_result.data[0]  # словарь
 
-        # 2. Проверка доступа (например, только для премиум-пользователей)
-        #if track_info.is_premium and not user.has_premium:
-        #    raise HTTPException(status_code=403, detail="Premium track")
+    # 2. Получаем исполнителя
+    artist_result = await session.table("Artist").select("*").eq("YID", track["Artists"]).execute()
+    if not artist_result.data:
+        raise HTTPException(status_code=404, detail="Artist not found")
+    artist = artist_result.data[0]
 
-        # 3. Формируем путь к файлу (допустим, файлы хранятся в ./tracks/{track_id}.mp3)
-        print("")
-        file_path = Path(f"./Data/Track/{track_info["Path"]}.mp3")
-        if not file_path.exists():
-            raise HTTPException(status_code=404, detail="Audio file missing")
+    # 3. Проверка доступа (если нужно)
+    # if track.get("is_premium") and not user.has_premium:
+    #     raise HTTPException(status_code=403, detail="Premium track")
 
-        # 5. Возвращаем файл
-        print(str(track_info.data[0].title) + " - " + str(track_info.data[0].artists) + " - " + str(track_info.data[0].artists))
+    # 4. Формируем безопасный путь к файлу
+    base_dir = Path("./Data/Track")
+    safe_path = base_dir / Path(track["Path"]).name
+    file_path = safe_path.with_suffix(".mp3")
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Audio file missing")
 
-        return FileResponse(
-            path=file_path,
-            media_type="audio/mpeg",  # или audio/ogg, audio/flac и т.д.
-            filename=f"{str(track_info.data[0]["title"]) + " - " + str(artist.data[0]["YID"]) + " - " + str(artist.data[0]["name"]) }.mp3",  # имя для сохранения
-            headers={"Content-Disposition": "inline"}  # воспроизводить в браузере
-        )
+    # 5. Имя для скачивания
+    filename = f"{track['title']} - {artist['name']}.mp3"
 
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(e)
-        raise HTTPException(status_code=500, detail="Internal server error")
+    return FileResponse(
+        path=file_path,
+        media_type="audio/mpeg",
+        filename=filename,
+        headers={"Content-Disposition": "inline"}
+    )
 
 
 @track_router.get("/{name}")
 async def get_track(name: str, session: SessionDep, user: UserDep):
     '''Быстрый поиск по названию'''
-    #try:
+    # 1. Проверка в БД на наличие трека
+    client = await get_client_yandex()
 
-    track = await session.table("Track").select("*").eq("Name", name).execute()
-    if track.data:
-        new_track = Track(
-            Id=track.data[0]['Id'],
-            Name=track.data[0]["Name"],
-            DurationMs=track.data[0]["Duration_ms"],
-            Artists=track.data[0]["Artists"],
-            Albums=0,
-            URL=track.data[0]["URL"],
-            URI=track.data[0]["URI"],
-            UserInfo=user.Id
-        )
-        return new_track
+    record = (await session.table("Track").select("*").ilike("Name", f'%{name}%').execute()).data
+
+    if len(record):
+        # Возвращение найденной записи
+        return await create_track_in_bd(**record[0])
     else:
-        client = await get_client_yandex()
-        track_ = (await client.search(name)).tracks.results[0]
+        # 2. Создаём и возвращаем найденную запись
 
-        artist = await (session.table("Artist")
-                        .select("*")
-                        .eq("Name", track_.artists[0].name)
-                        .eq("YID", track_.artists[0].id)
-                        .execute())
-        if artist.data:
-            new_track = Track(
-                    Id=int(track_.id),
-                    Name=track_.title,
-                    DurationMs=track_.duration_ms,
-                    Artists=artist.data[0]['YID'],
-                    Albums=0,
-                    URL=(await track_.get_download_info_async(get_direct_links=True))[0].direct_link,
-                    URI=(track_.get_og_image_url("50x50")),
-                    UserInfo=user.Id,
-                    Path="Data/Track/" + str(track_.title) + " - " + str(track_.artists[0].id) + " - " + str(track_.artists[0].name),
-                )
-            track = await add_track(
-                new_track,
-                session
-            )
+        track = (await client.search(name)).tracks.results[0]
+        artist = (await session.table("Artist").select("*").eq("YID", track.artists[0].id).execute()).data
+
+        if len(artist):
+            # Создаём запись и возвращаем её
+
+            new_track = await create_track(session, Id=int(track.id),
+                                           Name=track.title,
+                                           DurationMs=track.duration_ms,
+                                           Artists=artist[0]['YID'],
+                                           Albums=0,
+                                           URL=(await track.get_download_info_async(get_direct_links=True))[
+                                               0].direct_link,
+                                           URI=(track.get_og_image_url("50x50")),
+                                           UserInfo=user.Id,
+                                           Path="Data/Track/" + str(track.title) + " - " + str(
+                                               track.artists[0].id) + " - " + str(
+                                               track.artists[0].name), )
+
+            await track.download_async(filename="Data/Track/" + str(track.title) + " - " + str(
+                track.artists[0].id) + " - " + str(
+                track.artists[0].name) + ".mp3")
             return new_track
         else:
-            new_track = Track(
-                Id=int(track_.id),
-                Name=track_.title,
-                DurationMs=track_.duration_ms,
-                Artists=track_.artists[0].id,
-                Albums=0,
-                URL=(await track_.get_download_info_async(get_direct_links=True))[0].direct_link,
-                URI=(track_.get_og_image_url("50x50")),
-                UserInfo=user.Id,
-                Path="Data/Track/" + str(track_.title) + " - " + str(track_.artists[0].id) + " - " + str(track_.artists[0].name)
-            )
+            # 3. Добавляем автора и после создаём запись и возвращаем её
+            try:
+                new_artist = (await session.table("Artist").insert(
+                    {"YID": track.artists[0].id, "Name": track.artists[0].name}).execute())
 
-            response = await session.rpc(
-                "add_artist_and_track",
-                {
-                    "p_artist_yid": track_.artists[0].id,
-                    "p_artist_name": track_.artists[0].name,
-                    "p_track_name": track_.title,
-                    "p_duration_ms": track_.duration_ms,
-                    "p_url": (await track_.get_download_info_async(get_direct_links=True))[0].direct_link,
-                    "p_uri": track_.get_og_image_url("50x50"),
-                    "p_user_info": user.Id,
-                    "p_album_name": 0
-                }
-            ).execute()
-            print(response)
 
-            await track_.download_async(
-                filename="Data/Track/" + str(track_.title) + " - " + str(track_.artists[0].id) + " - " + str(
-                    track_.artists[0].name))
+                new_track = await create_track(session, Id=int(track.id),
+                                           Name=track.title,
+                                           DurationMs=track.duration_ms,
+                                           Artists=new_artist.data[0]['YID'],
+                                           Albums=0,
+                                           URL=(await track.get_download_info_async(get_direct_links=True))[
+                                               0].direct_link,
+                                           URI=(track.get_og_image_url("50x50")),
+                                           UserInfo=user.Id,
+                                           Path="Data/Track/" + str(track.title) + " - " + str(
+                                               track.artists[0].id) + " - " + str(
+                                               track.artists[0].name), )
+
+                await track.download_async(filename="Data/Track/" + str(track.title) + " - " + str(
+                    track.artists[0].id) + " - " + str(
+                    track.artists[0].name) + ".mp3")
+
+            except APIError as e:
+                print(e)
+                return Track()
+
+
 
             return new_track
-    #except Exception as e:
-        #print(e)
-        #return None
 
-
-
-
-async def add_artist(artist: Artist, session: SessionDep) -> bool:
-    try:
-        data = {"YID": artist.YID, "Name": artist.Name, "Genres": 0}
-
-        srb = await session.table("Artist").insert(data).execute()
-        if srb is not None:
-            return True
-        else:
-            return False
-
-    except Exception as e:
-        print(e)
-        return False
-
-async def add_track(track: Track, session: SessionDep) -> bool:
+async def create_track(session: SessionDep = None, **kwargs) -> Track:
+    """Создаёт трек для отправления пользователю.
+        Так же отправляет запись в БД"""
     try:
         data = {
-            "Name": track.Name,
-            "Duration_ms": track.DurationMs,
-            "URL": track.URL,
-            "URI": track.URI,
-            "UserInfo": track.UserInfo,
-            "Artists": track.Artists,
-            "Albums": track.Albums,
+            "Id": kwargs["Id"],
+            "Name": kwargs['Name'],
+            "Duration_ms": kwargs['DurationMs'],
+            "URL": kwargs['URL'],
+            "URI": kwargs['URI'],
+            "UserInfo": kwargs['UserInfo'],
+            "Albums": kwargs['Albums'],
+            "Path": kwargs['Path'],
+            'Artist': kwargs['Artists'],
         }
+        if session:
+            data = await session.table('Track').insert(data).execute()
 
-        srb = await session.table("Track").insert(data).execute()
-        return True
-
-
+        return Track(**kwargs)
     except Exception as e:
         print(e)
-        return False
+        return Track()
+
+async def create_track_in_bd(**kwargs) -> Track:
+    kwargs['DurationMs'] = kwargs['Duration_ms']
+    kwargs['Artists'] = kwargs['Artist']
+    return await create_track(**kwargs)
+
+
