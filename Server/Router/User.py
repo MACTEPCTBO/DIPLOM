@@ -201,3 +201,7 @@ async def get_current_user(
 
 # Теперь создаём тип зависимости
 UserDep = Annotated[UserAuth, Depends(get_current_user)]
+
+@user_router.post("/life_time_validation")
+async def life_time_validation(user: UserDep):
+    return status.HTTP_200_OK

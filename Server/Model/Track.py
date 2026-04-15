@@ -26,3 +26,14 @@ class Track(Base):
     URI: str | None = None
     UserInfo: int | None = None
     Path: str | None = None
+
+
+class Playlist(Base):
+    Id: int
+    Name: str
+    Tracks: list[Track] | None
+    Count: int = 0
+
+
+class Radio(Playlist):
+    ...

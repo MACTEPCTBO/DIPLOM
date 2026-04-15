@@ -36,6 +36,9 @@ class TokenStorage:
     def load_tokens(self) -> Optional[Dict[str, str]]:
         with self._get_connection() as conn:
             row = conn.execute("SELECT access_token, refresh_token FROM tokens WHERE id = 1").fetchone()
+
+
+
             if row:
                 return {"access_token": row["access_token"], "refresh_token": row["refresh_token"]}
         return None
