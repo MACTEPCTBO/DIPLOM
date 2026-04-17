@@ -2,12 +2,13 @@ from PySide6.QtCore import QObject, QUrl, Signal
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from models import Track
 
+
 class AudioController(QObject):
-    """Управление воспроизведением треков"""
     position_changed = Signal(int)
     duration_changed = Signal(int)
     state_changed = Signal(QMediaPlayer.PlaybackState)
     track_changed = Signal(Track)
+    track_finished = Signal()
     error_occurred = Signal(str)
 
     def __init__(self):
@@ -17,11 +18,11 @@ class AudioController(QObject):
         self.player.setAudioOutput(self.audio_output)
         self.audio_output.setVolume(0.7)
 
-        # Подключаем сигналы плеера к внутренним слотам
         self.player.positionChanged.connect(self._on_position_changed)
         self.player.durationChanged.connect(self._on_duration_changed)
         self.player.playbackStateChanged.connect(self._on_state_changed)
         self.player.errorOccurred.connect(self._on_error)
+        self.player.mediaStatusChanged.connect(self._on_media_status_changed)
 
         self.current_track: Track = None
 
@@ -37,7 +38,13 @@ class AudioController(QObject):
     def _on_error(self, error, error_string: str):
         self.error_occurred.emit(error_string)
 
+    def _on_media_status_changed(self, status: QMediaPlayer.MediaStatus):
+        if status == QMediaPlayer.EndOfMedia:
+            self.track_finished.emit()
+
     def play_track(self, track: Track):
+        self.player.stop()
+        self.player.setSource(QUrl())   # Сброс источника
         self.current_track = track
         if track.is_local:
             url = QUrl.fromLocalFile(track.url)

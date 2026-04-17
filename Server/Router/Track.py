@@ -1,9 +1,12 @@
 import asyncio
 from typing import Union, List, Dict, Any
 
+import aiofiles
+import aiohttp
 import yandex_music
 from fastapi import APIRouter
 from postgrest import APIError
+from starlette.responses import StreamingResponse
 from supabase import AsyncClient
 from yandex_music import ClientAsync
 
@@ -17,7 +20,7 @@ from pathlib import Path
 
 track_router = APIRouter(prefix=f"{API}/track", tags=["Track"])
 
-@track_router.get("/rating/like/add")
+@track_router.post("/rating/like/add")
 async def like_track_add(data: Track, user: UserDep) -> bool:
     try:
         client = await get_client_yandex()
@@ -30,7 +33,7 @@ async def like_track_add(data: Track, user: UserDep) -> bool:
         return False
 
 
-@track_router.get("/rating/dislike/add")
+@track_router.post("/rating/dislike/add")
 async def dislike_track_add(data: Track, user: UserDep) -> bool:
     try:
         client = await get_client_yandex()
@@ -42,7 +45,7 @@ async def dislike_track_add(data: Track, user: UserDep) -> bool:
         print(e)
         return False
 
-@track_router.get("/rating/like/remove")
+@track_router.post("/rating/like/remove")
 async def like_track_remove(data: Track, user: UserDep) -> bool:
     try:
         client = await get_client_yandex()
@@ -55,7 +58,7 @@ async def like_track_remove(data: Track, user: UserDep) -> bool:
         return False
 
 
-@track_router.get("/rating/dislike/remove")
+@track_router.post("/rating/dislike/remove")
 async def dislike_track_remove(data: Track, user: UserDep) -> bool:
     try:
         client = await get_client_yandex()
@@ -86,19 +89,53 @@ async def get_track_listen(Id: int, session: SessionDep):
     #     raise HTTPException(status_code=403, detail="Premium track")
 
     # 4. Формируем безопасный путь к файлу
-    safe_path = Path(track["Path"] + ".mp3")
-    if not safe_path.exists():
-        raise HTTPException(status_code=404, detail="Audio file missing")
-
-    # 5. Имя для скачивания
+    safe_path = Path(f"Data/Track/{track['Name']} - {artist['YID']} - {artist['Name']}.mp3")
     filename = f"{track['Name']} - {artist['Name']}.mp3"
 
-    return FileResponse(
-        path=safe_path,
-        media_type="audio/mpeg",
-        filename=filename,
-        headers={"Content-Disposition": "inline"}
-    )
+    # Если файл уже есть — отдаём через FileResponse (прогресс будет работать)
+    if safe_path.exists():
+        return FileResponse(
+            path=safe_path,
+            media_type="audio/mpeg",
+            filename=filename,
+            headers={"Content-Disposition": "inline"}
+        )
+
+    # Если файла нет — скачиваем из Яндекс.Музыки и сохраняем
+    try:
+        client = await get_client_yandex()
+        yandex_track = (await client.tracks(track["Id"]))[0]  # предполагаем поле YandexId
+        download_info = await yandex_track.get_download_info_async(get_direct_links=True)
+        direct_link = download_info[0].direct_link
+
+        # Скачиваем и сохраняем файл
+        safe_path.parent.mkdir(parents=True, exist_ok=True)
+        async with aiohttp.ClientSession() as http_session:
+            async with http_session.get(direct_link) as resp:
+                if resp.status != 200:
+                    raise HTTPException(404, "Failed to download from Yandex")
+                async with aiofiles.open(safe_path, 'wb') as f:
+                    async for chunk in resp.content.iter_chunked(8192):
+                        await f.write(chunk)
+
+        # После сохранения отдаём через FileResponse (теперь прогресс будет работать)
+        return FileResponse(
+            path=safe_path,
+            media_type="audio/mpeg",
+            filename=filename,
+            headers={"Content-Disposition": "inline"}
+        )
+
+    except Exception as e:
+        raise HTTPException(500, f"Yandex download error: {str(e)}")
+
+async def stream_from_url(url: str):
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url) as resp:
+            async for chunk in resp.content.iter_chunked(8192):
+                yield chunk
+
+
 
 @track_router.get("/{name}")
 async def get_track(name: str, session: SessionDep, user: UserDep) -> Track:
@@ -171,33 +208,6 @@ async def get_track(name: str, session: SessionDep, user: UserDep) -> Track:
 
             return new_track
 
-@track_router.get("/playlist/likes/{token}")
-async def get_likes_playlist(token: str, session: SessionDep, user: UserDep) -> Playlist:
-    try:
-        client = await get_client_yandex()
-
-        playlist = Playlist(Id=0, Name="Понравившееся", Count=0, Tracks=[])
-        tracks = []
-
-        liked_tracks = (await client.users_likes_tracks()).tracks
-        track_ids = [track.id for track in liked_tracks]
-        print(track_ids)
-
-        # предположим, есть метод client.tracks_by_ids (или что-то подобное)
-        tracks_data = await client.tracks(track_ids)  # возвращает список треков по порядку
-        tracks = []
-        for track_data in tracks_data:
-            print(track_data)
-            tracks.append(await get_track(track_data.title, session, user))
-
-        playlist.Count = len(tracks)
-        playlist.Tracks = tracks
-
-        return playlist
-
-    except Exception as e:
-        print(e)
-        return Playlist(Id=0, Name="Ошибка", Count=0, Tracks=[])
 
 
 
@@ -256,6 +266,10 @@ async def create_likes_playlist(
     supabase_records: List[Dict[str, Any]] = []
 
     for full_track, (direct_url, og_uri) in zip(full_tracks, url_uri_results):
+        if direct_url is None:
+            print(f"Пропускаем трек {full_track.id} – нет ссылки на скачивание")
+            continue
+
         artist_id = full_track.artists[0].id if full_track.artists else None
         album_id = full_track.albums[0].id if full_track.albums else None
 
@@ -416,21 +430,19 @@ async def is_artists(tracks, session: SessionDep) -> Artist:
 
 async def fetch_track_url_and_uri(track: yandex_music.Track) -> tuple[str | None, str | None]:
     """Параллельно получает прямую ссылку на скачивание и URI обложки."""
+    direct_url = None
+    og_image = None
     try:
-        # Задачи на получение ссылок
-        url_task = asyncio.create_task(track.get_download_info_async(get_direct_links=True))
-        download_info = await url_task
-
-        uri_task = track.get_og_image_url("300x300")
-        og_image = uri_task
-
-
-        direct_url = download_info[0].direct_link if download_info else None
-        return direct_url, og_image
+        download_info = await track.get_download_info_async(get_direct_links=True)
+        if download_info and len(download_info) > 0:
+            direct_url = download_info[0].direct_link
     except Exception as e:
-        # В случае ошибки возвращаем None для проблемного поля
-        print(f"Ошибка получения ссылок для трека {track.id}: {e}")
-        return None, None
+        print(f"Ошибка получения ссылки для трека {track.id}: {e}")
+    try:
+        og_image = track.get_og_image_url("300x300")
+    except Exception as e:
+        print(f"Ошибка получения обложки для трека {track.id}: {e}")
+    return direct_url, og_image
 
 
 
