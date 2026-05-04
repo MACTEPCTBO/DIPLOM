@@ -78,6 +78,11 @@ class HistoryEntry:
         time_str = self.timestamp.strftime("%H:%M")
         return f"{time_str}  {self.track.display_text()}"
 
+    def formatted_datetime(self) -> str:
+        return self.timestamp.strftime("%d.%m.%Y %H:%M")
+
+
+
 
 class TrackListModel(QAbstractListModel):
     CoverRole = Qt.UserRole + 1
@@ -137,7 +142,7 @@ class HistoryListModel(QAbstractListModel):
         if role == Qt.DisplayRole:
             return entry.display_text()
         elif role == Qt.UserRole:
-            return entry.track
+            return entry
         return None
 
     def add_entry(self, entry: HistoryEntry):

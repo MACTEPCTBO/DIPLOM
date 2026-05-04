@@ -1,7 +1,7 @@
 import os
 from yandex_music import ClientAsync
 
-IP = "192.168.1.105"
+IP = "127.0.0.1"
 PORT = 8000
 
 API = "/api/server"

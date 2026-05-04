@@ -6,11 +6,10 @@ import aiohttp
 import yandex_music
 from fastapi import APIRouter
 from postgrest import APIError
-from starlette.responses import StreamingResponse
 from supabase import AsyncClient
 from yandex_music import ClientAsync
 
-from Server.Model.Track import Track, Playlist, Artist
+from Server.Model.Track import Track, Playlist, Artist, RadioStart
 from Server.Router.User import UserDep
 from Server.engine import SessionDep, get_supabase_client
 from setting import API, get_client_yandex
@@ -349,7 +348,35 @@ async def get_playlist(name: str, token: str, session: SessionDep, user: UserDep
         return e
 
 
+@track_router.post("/radio")
+async def radio_station(data: RadioStart) -> list[Track]:
+    """Создаёт радио с треками по Id трека, жанру или волне"""
 
+    #TODO вставить авторизацию
+    ", user: UserDep"
+
+    client = await get_client_yandex()
+    result = await client.rotor_station_tracks(station=data.Station, queue=data.Queue if data.Queue else None)
+
+    print(result)
+    response = []
+    for track in result.sequence:
+        track = track.track
+        print(track)
+        response.append(Track(
+            Id=track.id,
+            Name=track.title,
+            DurationMs=track.duration_ms,
+            Artists=track.artists[0].id,
+            Albums=0,
+            URL=(await track.get_download_info_async(get_direct_links=True))[
+                0].direct_link,
+            URI=(track.get_og_image_url("300x300")),
+            UserInfo=1,
+            Path=None
+        ))
+
+    return response
 
 
 async def create_track(session: SessionDep = None, **kwargs) -> Track:

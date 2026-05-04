@@ -1,3 +1,6 @@
+from datetime import datetime
+from typing import Union
+
 from Server.Model.Base import Base
 
 
@@ -17,7 +20,7 @@ class Album(Base):
 
 
 class Track(Base):
-    Id: int | None = None
+    Id: int | Union[int] | None = None
     Name: str | None = None
     DurationMs: int | None = None
     Artists: int | None = None
@@ -35,5 +38,20 @@ class Playlist(Base):
     Count: int = 0
 
 
-class Radio(Playlist):
-    ...
+class RadioStart(Base):
+    Station: str
+    Queue: str | int | None = None
+
+class RadioResponse(Base):
+    Tracks: list[Track]
+    BatchId: str
+
+
+class FeedBack(Base):
+    Station: str
+    Type_: str
+    Timestamp: int
+    From_: str
+    BatchId: str | None
+    TotalPlayedSeconds: float
+    TrackId: int

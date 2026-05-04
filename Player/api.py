@@ -7,7 +7,9 @@ from models import Track, Playlist
 import sqlite3
 from pathlib import Path
 
-SERVER_URL = "http://192.168.1.105:8000"
+from setting import IP, PORT
+
+SERVER_URL = f"http://{IP}:{PORT}"
 API_PREFIX = "/api/server"  # Исправлено на /api вместо /api/server
 
 

@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtGui import QPalette, QColor
 
+from history_storage import HistoryStorage
 from models import Track, Playlist, TrackListModel, HistoryEntry, HistoryListModel
 from api import ServerAPI
 from player import AudioController
@@ -31,6 +32,7 @@ class MainWindow(QMainWindow):
         self.audio_controller = AudioController()
         self.track_model = TrackListModel()          # модель для главной страницы
         self.history_model = HistoryListModel()
+        self.history_storage = HistoryStorage()
 
         self.current_playlist: Optional[Playlist] = None
         self.current_track_index: int = -1
@@ -44,6 +46,7 @@ class MainWindow(QMainWindow):
         self.current_track_liked = False
         self.current_track_disliked = False
 
+        self._load_history_from_db()
         self._setup_ui()
         self._connect_signals()
         self._load_local_playlists()
@@ -257,6 +260,9 @@ class MainWindow(QMainWindow):
 
         self.likes_playlist_view.track_selected.connect(self._play_track_from_likes)
 
+        self.history_widget.track_selected.connect(self._play_track_from_history)
+        self.history_widget.clear_requested.connect(self.clear_history)
+
     # ------------------------------------------------------------------
     # Обработчики плеера
     # ------------------------------------------------------------------
@@ -341,7 +347,7 @@ class MainWindow(QMainWindow):
 
         if self.track_model.rowCount() > 0:
             for track in self.track_model.tracks():
-                self.history_model.add_entry(HistoryEntry(track=track))
+                self.add_to_history(HistoryEntry(track=track))
 
         self.track_model.clear()
         for track in tracks:
@@ -373,7 +379,7 @@ class MainWindow(QMainWindow):
     def clear_playlist(self):
         if self.track_model.rowCount() > 0:
             for track in self.track_model.tracks():
-                self.history_model.add_entry(HistoryEntry(track=track))
+                self.add_to_history(HistoryEntry(track=track))
         self.track_model.clear()
         self.current_playlist = None
         self.current_track_index = -1
@@ -425,7 +431,7 @@ class MainWindow(QMainWindow):
     def _set_current_playlist(self, playlist: Playlist):
         if self.track_model.rowCount() > 0:
             for track in self.track_model.tracks():
-                self.history_model.add_entry(HistoryEntry(track=track))
+                self.add_to_history(HistoryEntry(track=track))
 
         self.current_playlist = playlist
         self.track_model.clear()
@@ -492,7 +498,7 @@ class MainWindow(QMainWindow):
         if not track.is_local and track.server_id:
             track.url = self.api.get_stream_url(track.server_id)
         self.audio_controller.play_track(track)
-        self.history_model.add_entry(HistoryEntry(track=track))
+        self.add_to_history(HistoryEntry(track=track))
         self.playlist_view.set_current_track_info(track.title, track.artist, track.cover_uri)
         self.likes_playlist_view.set_current_track_info(track.title, track.artist, track.cover_uri)
 
@@ -598,3 +604,19 @@ class MainWindow(QMainWindow):
 
     def _on_radio_station_selected(self, station: dict):
         QMessageBox.information(self, "Радио", f"Выбрана станция: {station.get('name')}\n(функционал в разработке)")
+
+    def _load_history_from_db(self):
+        """Загружает историю из БД в модель."""
+        entries = self.history_storage.load_entries()
+        for entry in entries:
+            self.history_model.add_entry(entry)
+
+    def add_to_history(self, entry: HistoryEntry):
+        """Добавляет запись в модель и сохраняет в БД."""
+        self.history_model.add_entry(entry)
+        self.history_storage.save_entry(entry)
+
+    def clear_history(self):
+        """Очищает историю (модель + БД)."""
+        self.history_model.clear()
+        self.history_storage.clear_history()
