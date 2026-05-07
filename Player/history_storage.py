@@ -1,4 +1,3 @@
-# history_storage.py
 import sqlite3
 import json
 from pathlib import Path
@@ -6,8 +5,8 @@ from datetime import datetime
 from typing import List, Optional
 from models import Track, HistoryEntry
 
+
 class HistoryStorage:
-    """Хранилище истории прослушивания в SQLite."""
     def __init__(self, db_path: Path = Path("history.db")):
         self.db_path = db_path
         self._init_db()
@@ -21,11 +20,9 @@ class HistoryStorage:
                     timestamp REAL NOT NULL
                 )
             """)
-            # Индекс для быстрой сортировки по времени
             conn.execute("CREATE INDEX IF NOT EXISTS idx_timestamp ON history(timestamp)")
 
     def save_entry(self, entry: HistoryEntry):
-        """Сохраняет одну запись в БД."""
         track_dict = entry.track.to_dict()
         track_json = json.dumps(track_dict, ensure_ascii=False)
         timestamp = entry.timestamp.timestamp()
@@ -36,7 +33,6 @@ class HistoryStorage:
             )
 
     def load_entries(self, limit: int = 200) -> List[HistoryEntry]:
-        """Загружает последние `limit` записей (от новых к старым)."""
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
@@ -49,10 +45,8 @@ class HistoryStorage:
             track = Track.from_dict(track_data)
             timestamp = datetime.fromtimestamp(row["timestamp"])
             entries.append(HistoryEntry(track=track, timestamp=timestamp))
-        # Возвращаем в хронологическом порядке (старые внизу)
         return list(reversed(entries))
 
     def clear_history(self):
-        """Удаляет всю историю."""
         with sqlite3.connect(self.db_path) as conn:
             conn.execute("DELETE FROM history")

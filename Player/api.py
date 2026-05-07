@@ -1,16 +1,15 @@
-# api.py
 import json
-from typing import List, Optional, Dict, Any
+from typing import List, Optional
 from PySide6.QtCore import QObject, Signal, QUrl
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
 from models import Track, Playlist
 import sqlite3
 from pathlib import Path
 
-from setting import IP, PORT
+from setting import API
 
-SERVER_URL = f"http://{IP}:{PORT}"
-API_PREFIX = "/api/server"  # Исправлено на /api вместо /api/server
+SERVER_URL = API
+API_PREFIX = "/api/server"
 
 
 class TokenStorage:
@@ -57,17 +56,22 @@ class ServerAPI(QObject):
     playlist_loaded = Signal(Playlist)
     playlist_load_failed = Signal(str)
     like_status_changed = Signal(bool)
-    radio_stations_loaded = Signal(list)
+    radio_stations_loaded = Signal(list)      # список названий станций (list[str])
     token_refreshed = Signal(str, str)
+    radio_tracks_loaded = Signal(list, object)   # (tracks, last_id)
+    radio_load_failed = Signal(str)
 
     def __init__(self, base_url: str = SERVER_URL):
         super().__init__()
-        self.base_url = base_url.rstrip('/')
+        try:
+            self.base_url = base_url.rstrip('/')
+        except AttributeError:
+            self.base_url = base_url
         self.access_token: Optional[str] = None
         self.refresh_token: Optional[str] = None
         self.nam = QNetworkAccessManager()
         self.nam.finished.connect(self._handle_reply)
-        self._pending_requests = {}  # reply -> (type, retry_info)
+        self._pending_requests = {}
         self.token_storage = TokenStorage()
         tokens = self.token_storage.load_tokens()
         if tokens:
@@ -101,7 +105,7 @@ class ServerAPI(QObject):
             "method": method,
             "url": url,
             "data": data,
-            "req_type": req_type  # сохраняем тип для повтора
+            "req_type": req_type
         })
 
     def login(self, login: str, password: str):
@@ -161,34 +165,29 @@ class ServerAPI(QObject):
         data = json.dumps({"Id": track_id}).encode()
         self._make_request("POST", url, "dislike", data)
 
-    def load_radio_stations(self):
-        stations = [
-            {
-                "id": {"type": "genre", "tag": "pop"},
-                "name": "Поп",
-                "icon": {
-                    "background_color": "#FF6665",
-                    "image_url": "https://avatars.yandex.net/get-music-misc/34161/rotor-genre-pop-icon/%%"
-                }
-            },
-            {
-                "id": {"type": "genre", "tag": "rock"},
-                "name": "Рок",
-                "icon": {
-                    "background_color": "#E62E2E",
-                    "image_url": "https://avatars.yandex.net/get-music-misc/34161/rotor-genre-rock-icon/%%"
-                }
-            },
-            {
-                "id": {"type": "genre", "tag": "electronic"},
-                "name": "Электроника",
-                "icon": {
-                    "background_color": "#8A2BE2",
-                    "image_url": "https://avatars.yandex.net/get-music-misc/34161/rotor-genre-electronic-icon/%%"
-                }
-            }
-        ]
-        self.radio_stations_loaded.emit(stations)
+    def get_radio_stations(self):
+        print('start')
+        """Запросить список доступных радиостанций с сервера (GET /radio/)."""
+        #if not self.access_token:
+            #self.radio_load_failed.emit("Not authenticated")
+            #return
+        url = f"{self.base_url}{API_PREFIX}/track/radio/"
+        self._make_request("GET", url, "radio_stations")
+
+    def get_radio_tracks(self, station: str, last_id: Optional[int] = None):
+        """Запросить пачку треков радиостанции (POST /radio)."""
+        #if not self.access_token:
+            #self.radio_load_failed.emit("Not authenticated")
+            #return
+        print('get_radio_tracks')
+        url = f"{self.base_url}{API_PREFIX}/track/radio/"
+        data = {"Station": "genre:" + station, "LastIdTrack": None}
+        if last_id is not None:
+            data["LastIdTrack"] = last_id
+
+        print(url, data)
+        req_data = json.dumps(data).encode()
+        self._make_request("POST", url, "radio", req_data)
 
     def _handle_reply(self, reply: QNetworkReply):
         if reply not in self._pending_requests:
@@ -197,7 +196,6 @@ class ServerAPI(QObject):
         status_code = reply.attribute(QNetworkRequest.HttpStatusCodeAttribute)
 
         if status_code == 401 and req_type != "refresh" and self.refresh_token:
-            # Сохраняем запрос для повтора и запускаем обновление токена
             self._pending_requests[reply] = (req_type, retry_data)
             self.refresh_token_request()
             reply.deleteLater()
@@ -216,6 +214,10 @@ class ServerAPI(QObject):
             elif req_type == "refresh":
                 self.clear_tokens()
                 self.login_failed.emit("Session expired. Please login again.")
+            elif req_type == "radio":
+                self.radio_load_failed.emit(err_msg)
+            elif req_type == "radio_stations":
+                self.radio_load_failed.emit(err_msg)
             reply.deleteLater()
             return
 
@@ -244,7 +246,6 @@ class ServerAPI(QObject):
                 self.refresh_token = refresh
                 self.token_storage.save_tokens(access, refresh)
                 self.token_refreshed.emit(access, refresh)
-                # Повторяем исходный запрос, если он был
                 if retry_data:
                     method = retry_data["method"]
                     url = retry_data["url"]
@@ -269,6 +270,19 @@ class ServerAPI(QObject):
         elif req_type in ("like", "dislike"):
             success = json_data if isinstance(json_data, bool) else False
             self.like_status_changed.emit(success)
+
+        elif req_type == "radio":
+            tracks, last_id = self._parse_radio_response(json_data)
+            if tracks is not None:
+                self.radio_tracks_loaded.emit(tracks, last_id)
+            else:
+                self.radio_load_failed.emit("Invalid radio response")
+
+        elif req_type == "radio_stations":
+            if isinstance(json_data, list):
+                self.radio_stations_loaded.emit(json_data)
+            else:
+                self.radio_load_failed.emit("Invalid stations list")
 
         reply.deleteLater()
 
@@ -323,6 +337,27 @@ class ServerAPI(QObject):
             playlist_type="server",
             count=count
         )
+
+    def _parse_radio_response(self, data) -> tuple[Optional[List[Track]], Optional[int]]:
+        if not data or "Tracks" not in data:
+            return None, None
+        tracks_data = data.get("Tracks", [])
+        last_id = data.get("LastIdTrack")
+        tracks = []
+        for item in tracks_data:
+            artist_name = self._extract_artist_name(item)
+            track = Track(
+                id=item.get("Id"),
+                title=item.get("Name", "Unknown"),
+                artist=artist_name,
+                duration_ms=item.get("DurationMs", 0) or item.get("Duration_ms", 0),
+                url=item.get("URL", ""),
+                is_local=False,
+                server_id=item.get("Id"),
+                cover_uri=self.get_full_cover_url(item.get("URI", ""))
+            )
+            tracks.append(track)
+        return tracks, last_id
 
     def _extract_artist_name(self, item: dict) -> str:
         artists = item.get("Artists")

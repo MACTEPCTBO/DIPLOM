@@ -44,6 +44,7 @@ async def login(
     data: Login,
     session: SessionDep
 ):
+    print(data)
     # Если передан AccessToken, используем его для аутентификации
     if data.AccessToken is None:
         # Проверка логина/пароля

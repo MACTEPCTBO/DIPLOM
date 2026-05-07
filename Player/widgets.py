@@ -1,16 +1,14 @@
-from PySide6.QtCore import Qt, Signal, QUrl, QRectF, QAbstractListModel
-from PySide6.QtGui import QPalette, QColor, QFont, QIcon, QPixmap, QPainter
+from typing import List
+
+from PySide6.QtCore import Qt, Signal, QUrl, QRectF, QAbstractListModel, QRect, QSize, QModelIndex
+from PySide6.QtGui import QPalette, QColor, QFont, QIcon, QPixmap, QPainter, QPen
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
-    QSlider, QListView, QLineEdit, QFrame, QListWidget, QListWidgetItem
+    QSlider, QListView, QLineEdit, QFrame, QListWidget, QListWidgetItem, QStyledItemDelegate, QStyle
 )
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
 
-from PySide6.QtCore import QSize, QModelIndex, QRect, Qt
-from PySide6.QtGui import QPainter, QPixmap, QFont, QColor, QPen
-from PySide6.QtWidgets import QStyledItemDelegate, QStyle
-
-from models import TrackListModel, HistoryListModel, Track
+from models import TrackListModel, HistoryListModel, Track, HistoryEntry
 
 
 class CoverLabel(QLabel):
@@ -598,6 +596,99 @@ class TrackItemDelegate(QStyledItemDelegate):
         reply.deleteLater()
 
 
+class HistoryItemDelegate(QStyledItemDelegate):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._icon_cache = {}
+
+    def _get_icon_pixmap(self, is_local: bool, size: int = 24) -> QPixmap:
+        key = ("local" if is_local else "server", size)
+        if key in self._icon_cache:
+            return self._icon_cache[key]
+
+        pixmap = QPixmap(size, size)
+        pixmap.fill(Qt.transparent)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing)
+        if is_local:
+            painter.setBrush(QColor("#4CAF50"))
+            painter.setPen(Qt.NoPen)
+            painter.drawEllipse(2, 2, size-4, size-4)
+            painter.setPen(QPen(QColor("white"), 2))
+            painter.drawEllipse(size//2 - 4, size//2 - 4, 8, 8)
+        else:
+            painter.setBrush(QColor("#2196F3"))
+            painter.setPen(Qt.NoPen)
+            painter.drawRoundedRect(4, size//2 - 6, size-8, 12, 4, 4)
+            painter.setBrush(QColor("white"))
+            painter.drawEllipse(size//2 - 5, size//2 - 2, 10, 10)
+        painter.end()
+        self._icon_cache[key] = pixmap
+        return pixmap
+
+    def paint(self, painter: QPainter, option, index: QModelIndex):
+        if not index.isValid():
+            return
+
+        painter.save()
+        rect = option.rect
+
+        if option.state & QStyle.State_Selected:
+            painter.fillRect(rect, option.palette.highlight())
+        elif option.state & QStyle.State_MouseOver:
+            painter.fillRect(rect, QColor("#2A2A2A"))
+        else:
+            painter.fillRect(rect, QColor("#1E1E1E") if index.row() % 2 == 0 else QColor("#262626"))
+
+        entry = index.data(Qt.UserRole)
+        if not entry:
+            painter.restore()
+            return
+
+        track = entry.track
+        is_local = track.is_local
+
+        icon_size = 28
+        margin = 8
+        icon_rect = QRect(rect.left() + margin, rect.top() + (rect.height() - icon_size)//2,
+                          icon_size, icon_size)
+        pixmap = self._get_icon_pixmap(is_local, icon_size)
+        painter.drawPixmap(icon_rect, pixmap)
+
+        datetime_text = entry.formatted_datetime()
+        font = painter.font()
+        font.setPointSize(9)
+        painter.setFont(font)
+        max_datetime_width = 95
+        elided_datetime = painter.fontMetrics().elidedText(datetime_text, Qt.ElideRight, max_datetime_width)
+        datetime_rect = QRect(icon_rect.right() + margin, rect.top(),
+                              max_datetime_width, rect.height())
+        painter.setPen(QColor("#AAAAAA"))
+        painter.drawText(datetime_rect, Qt.AlignLeft | Qt.AlignVCenter, elided_datetime)
+
+        play_icon_space = 30
+        text_rect = QRect(datetime_rect.right() + margin, rect.top(),
+                          rect.width() - (datetime_rect.right() + margin + play_icon_space + margin),
+                          rect.height())
+        painter.setPen(QColor("white"))
+        font.setPointSize(11)
+        painter.setFont(font)
+        track_text = track.display_text()
+        painter.drawText(text_rect, Qt.AlignLeft | Qt.AlignVCenter,
+                         painter.fontMetrics().elidedText(track_text, Qt.ElideRight, text_rect.width()))
+
+        play_icon_rect = QRect(rect.right() - play_icon_space - margin,
+                               rect.top() + (rect.height() - 24)//2, 24, 24)
+        painter.setFont(QFont("Arial", 14))
+        painter.setPen(QColor("#1DB954"))
+        painter.drawText(play_icon_rect, Qt.AlignCenter, "▶")
+
+        painter.restore()
+
+    def sizeHint(self, option, index: QModelIndex) -> QSize:
+        return QSize(option.rect.width(), 60)
+
+
 class RadioStationDelegate(QStyledItemDelegate):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -686,7 +777,12 @@ class RadioStationDelegate(QStyledItemDelegate):
 class RadioListModel(QAbstractListModel):
     def __init__(self, stations=None):
         super().__init__()
-        self._stations = stations or []
+        self._stations = stations or []  # список dict {"id": name, "name": name}
+
+    def set_stations(self, station_names: List[str]):
+        self.beginResetModel()
+        self._stations = [{"id": name, "name": name} for name in station_names]
+        self.endResetModel()
 
     def rowCount(self, parent=QModelIndex()):
         return len(self._stations)
@@ -736,9 +832,8 @@ class RadioWidget(QWidget):
         self.list_view.clicked.connect(self._on_station_clicked)
         layout.addWidget(self.list_view)
 
-    def load_stations(self, stations):
-        self.model._stations = stations
-        self.model.layoutChanged.emit()
+    def load_stations(self, station_names: List[str]):
+        self.model.set_stations(station_names)
 
     def _on_station_clicked(self, index):
         station = index.data(Qt.UserRole)
@@ -763,33 +858,32 @@ class HistoryWidget(QWidget):
 
         self.list_view = QListView()
         self.list_view.setModel(self.model)
-        # Установка кастомного делегата
         self.list_view.setItemDelegate(HistoryItemDelegate(self.list_view))
         self.list_view.setStyleSheet("""
-                    QListView {
-                        background-color: #1E1E1E;
-                        border: none;
-                        outline: none;
-                    }
-                    QListView::item {
-                        border-bottom: 1px solid #333333;
-                    }
-                """)
+            QListView {
+                background-color: #1E1E1E;
+                border: none;
+                outline: none;
+            }
+            QListView::item {
+                border-bottom: 1px solid #333333;
+            }
+        """)
         self.list_view.doubleClicked.connect(self._on_double_click)
         layout.addWidget(self.list_view, 1)
 
         btn_clear = QPushButton("Очистить историю")
         btn_clear.setStyleSheet("""
-                    QPushButton {
-                        background-color: #333333;
-                        border: none;
-                        border-radius: 5px;
-                        padding: 8px 12px;
-                    }
-                    QPushButton:hover {
-                        background-color: #444444;
-                    }
-                """)
+            QPushButton {
+                background-color: #333333;
+                border: none;
+                border-radius: 5px;
+                padding: 8px 12px;
+            }
+            QPushButton:hover {
+                background-color: #444444;
+            }
+        """)
         btn_clear.clicked.connect(self.clear_requested.emit)
         layout.addWidget(btn_clear)
 
@@ -798,101 +892,3 @@ class HistoryWidget(QWidget):
             entry = index.data(Qt.UserRole)
             if entry and entry.track:
                 self.track_selected.emit(entry.track)
-
-
-class HistoryItemDelegate(QStyledItemDelegate):
-    """Делегат для отображения истории с иконками и датой."""
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self._icon_cache = {}
-
-    def _get_icon_pixmap(self, is_local: bool, size: int = 24) -> QPixmap:
-        """Возвращает пиксему для локального или серверного трека."""
-        key = ("local" if is_local else "server", size)
-        if key in self._icon_cache:
-            return self._icon_cache[key]
-
-        pixmap = QPixmap(size, size)
-        pixmap.fill(Qt.transparent)
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.Antialiasing)
-        if is_local:
-            # Иконка диска
-            painter.setBrush(QColor("#4CAF50"))
-            painter.setPen(Qt.NoPen)
-            painter.drawEllipse(2, 2, size-4, size-4)
-            painter.setPen(QPen(QColor("white"), 2))
-            painter.drawEllipse(size//2 - 4, size//2 - 4, 8, 8)
-        else:
-            # Иконка облака
-            painter.setBrush(QColor("#2196F3"))
-            painter.setPen(Qt.NoPen)
-            painter.drawRoundedRect(4, size//2 - 6, size-8, 12, 4, 4)
-            painter.setBrush(QColor("white"))
-            painter.drawEllipse(size//2 - 5, size//2 - 2, 10, 10)
-        painter.end()
-        self._icon_cache[key] = pixmap
-        return pixmap
-
-    def paint(self, painter: QPainter, option, index: QModelIndex):
-        if not index.isValid():
-            return
-
-        painter.save()
-        rect = option.rect
-
-        if option.state & QStyle.State_Selected:
-            painter.fillRect(rect, option.palette.highlight())
-        elif option.state & QStyle.State_MouseOver:
-            painter.fillRect(rect, QColor("#2A2A2A"))
-        else:
-            painter.fillRect(rect, QColor("#1E1E1E") if index.row() % 2 == 0 else QColor("#262626"))
-
-        entry = index.data(Qt.UserRole)
-        if not entry:
-            painter.restore()
-            return
-
-        track = entry.track
-        is_local = track.is_local
-
-        # иконка типа трека
-        icon_size = 28
-        margin = 10
-        icon_rect = QRect(rect.left() + margin, rect.top() + (rect.height() - icon_size) // 2,
-                          icon_size, icon_size)
-        pixmap = self._get_icon_pixmap(is_local, icon_size)
-        painter.drawPixmap(icon_rect, pixmap)
-
-        # дата/время
-        datetime_text = entry.formatted_datetime()
-        font = painter.font()
-        font.setPointSize(9)  # меньший шрифт для даты
-        painter.setFont(font)
-        max_datetime_width = 95  # максимальная ширина для даты
-        elided_datetime = painter.fontMetrics().elidedText(datetime_text, Qt.ElideRight, max_datetime_width)
-        datetime_rect = QRect(icon_rect.right() + margin, rect.top(),
-                              max_datetime_width, rect.height())
-        painter.setPen(QColor("#AAAAAA"))
-        painter.drawText(datetime_rect, Qt.AlignLeft | Qt.AlignVCenter, elided_datetime)
-
-        # название трека
-        track_text = track.display_text()
-        text_rect = QRect(datetime_rect.right() + margin, rect.top(),
-                          rect.width() - (datetime_rect.right() + margin) - 60, rect.height())
-        painter.setPen(QColor("white"))
-        font.setPointSize(11)
-        painter.setFont(font)
-        painter.drawText(text_rect, Qt.AlignLeft | Qt.AlignVCenter,
-                         painter.fontMetrics().elidedText(track_text, Qt.ElideRight, text_rect.width()))
-
-        # иконка воспроизведения (▶)
-        play_icon_rect = QRect(rect.right() - 40, rect.top() + (rect.height() - 24) // 2, 24, 24)
-        painter.setFont(QFont("Arial", 14))
-        painter.setPen(QColor("#1DB954"))
-        painter.drawText(play_icon_rect, Qt.AlignCenter, "▶")
-
-        painter.restore()
-
-    def sizeHint(self, option, index: QModelIndex) -> QSize:
-        return QSize(option.rect.width(), 60)

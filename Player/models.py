@@ -82,8 +82,6 @@ class HistoryEntry:
         return self.timestamp.strftime("%d.%m.%Y %H:%M")
 
 
-
-
 class TrackListModel(QAbstractListModel):
     CoverRole = Qt.UserRole + 1
 
@@ -127,7 +125,6 @@ class TrackListModel(QAbstractListModel):
 
 
 class HistoryListModel(QAbstractListModel):
-    """Модель для отображения истории прослушивания"""
     def __init__(self, entries: List[HistoryEntry] = None):
         super().__init__()
         self._entries = entries or []
@@ -142,7 +139,7 @@ class HistoryListModel(QAbstractListModel):
         if role == Qt.DisplayRole:
             return entry.display_text()
         elif role == Qt.UserRole:
-            return entry
+            return entry  # возвращаем HistoryEntry, не Track
         return None
 
     def add_entry(self, entry: HistoryEntry):

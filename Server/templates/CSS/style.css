@@ -1,0 +1,391 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    font-family: 'Segoe UI', 'Poppins', system-ui, sans-serif;
+}
+
+body {
+    min-height: 100vh;
+    background: radial-gradient(ellipse at 20% 30%, #0a0f1e, #03050b);
+    color: #eef5ff;
+    position: relative;
+    overflow-x: hidden;
+}
+
+/* звёздный фон */
+.stars {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 0;
+}
+.star {
+    position: absolute;
+    background: white;
+    border-radius: 50%;
+    opacity: 0.6;
+    animation: twinkle 3s infinite alternate;
+}
+@keyframes twinkle {
+    0% { opacity: 0.2; transform: scale(1);}
+    100% { opacity: 1; transform: scale(1.2);}
+}
+
+/* страницы (переключаемые) */
+.page {
+    display: none;
+}
+.page.active-page {
+    display: block;
+}
+
+/* контейнер приложения */
+.main-interface {
+    display: none;
+    position: relative;
+    z-index: 2;
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 1.5rem 2rem 6rem;
+}
+
+/* приветственное окно */
+#welcomePage {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.85);
+    backdrop-filter: blur(12px);
+    z-index: 200;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.welcome-card {
+    background: rgba(10, 20, 40, 0.95);
+    border-radius: 3rem;
+    padding: 2.5rem;
+    text-align: center;
+    max-width: 400px;
+    border: 1px solid #6e5eff;
+    box-shadow: 0 0 40px rgba(100, 70, 255, 0.4);
+}
+.welcome-card h1 {
+    font-size: 2.5rem;
+    background: linear-gradient(135deg, #c0e0ff, #a07eff);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+}
+
+/* кнопки */
+.btn {
+    background: rgba(20, 30, 55, 0.8);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(100, 150, 255, 0.5);
+    padding: 0.7rem 1.8rem;
+    border-radius: 40px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: 0.2s;
+    color: white;
+    font-size: 1rem;
+}
+.btn-primary {
+    background: linear-gradient(95deg, #3a2c7a, #1e3a8a);
+    border-color: #8a6eff;
+    box-shadow: 0 0 8px rgba(106, 90, 255, 0.5);
+}
+.btn-primary:hover {
+    transform: translateY(-2px);
+    background: linear-gradient(95deg, #5a3eaa, #2f4eb0);
+}
+.btn-outline {
+    background: transparent;
+    border-color: #4b6eff;
+}
+.btn-outline:hover {
+    background: rgba(75, 110, 255, 0.2);
+}
+
+/* навигация */
+.navbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 1rem;
+    margin-bottom: 2rem;
+    border-bottom: 1px solid rgba(88, 130, 255, 0.3);
+    padding-bottom: 1rem;
+}
+.logo {
+    font-size: 1.8rem;
+    font-weight: 800;
+    background: linear-gradient(135deg, #b2f0ff, #7a4eff);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+}
+.nav-links {
+    display: flex;
+    gap: 1rem;
+}
+.nav-link {
+    background: none;
+    border: none;
+    color: #ccd9ff;
+    font-size: 1rem;
+    padding: 0.5rem 1rem;
+    cursor: pointer;
+    border-radius: 40px;
+    transition: 0.2s;
+}
+.nav-link.active {
+    background: rgba(100, 80, 255, 0.4);
+    color: white;
+}
+.logout-btn {
+    background: rgba(180, 70, 70, 0.3);
+    border: 1px solid #ff7a6e;
+}
+
+/* сетка карточек */
+.grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+    gap: 1.5rem;
+    margin: 1.5rem 0;
+}
+.track-card, .station-card {
+    background: rgba(12, 20, 35, 0.65);
+    backdrop-filter: blur(12px);
+    border-radius: 28px;
+    padding: 1rem;
+    transition: 0.25s;
+    border: 1px solid rgba(110, 150, 255, 0.2);
+}
+.track-card:hover, .station-card:hover {
+    transform: translateY(-6px);
+    border-color: #7b6eff;
+}
+.cover-icon {
+    width: 100%;
+    aspect-ratio: 1;
+    background: linear-gradient(145deg, #191e2e, #0f1322);
+    border-radius: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 3rem;
+    margin-bottom: 1rem;
+}
+.title {
+    font-weight: 600;
+    font-size: 1.1rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.artist {
+    font-size: 0.8rem;
+    color: #bac8ff;
+    margin: 0.3rem 0 1rem;
+}
+.play-btn {
+    background: #2f2c6e;
+    border: none;
+    color: white;
+    padding: 0.5rem;
+    border-radius: 40px;
+    width: 100%;
+    cursor: pointer;
+}
+
+/* плеер */
+.player-bar {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    background: rgba(8, 12, 25, 0.95);
+    backdrop-filter: blur(20px);
+    border-top: 1px solid #6a5eff;
+    padding: 0.8rem 2rem;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    z-index: 20;
+}
+.now-playing {
+    min-width: 180px;
+}
+.audio-controls {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+    flex: 2;
+    justify-content: center;
+}
+.audio-controls button {
+    background: none;
+    border: none;
+    font-size: 1.8rem;
+    cursor: pointer;
+    color: #dbe4ff;
+}
+progress {
+    width: 280px;
+    height: 5px;
+    border-radius: 10px;
+}
+.volume-slider {
+    width: 100px;
+}
+.time {
+    font-size: 0.75rem;
+    font-family: monospace;
+}
+
+/* модалки */
+.modal {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.8);
+    backdrop-filter: blur(10px);
+    z-index: 300;
+    justify-content: center;
+    align-items: center;
+}
+.modal-card {
+    background: #0f1222e6;
+    border-radius: 2rem;
+    padding: 2rem;
+    width: 90%;
+    max-width: 400px;
+    border: 1px solid #656eff;
+}
+.modal-card input {
+    width: 100%;
+    padding: 0.8rem;
+    margin: 0.5rem 0;
+    background: #1b1f32;
+    border: 1px solid #4a5b9e;
+    border-radius: 60px;
+    color: white;
+}
+.message {
+    margin-top: 0.8rem;
+    text-align: center;
+    color: #ffb973;
+}
+
+@media (max-width: 700px) {
+    .main-interface { padding: 1rem 1rem 5rem; }
+    .player-bar { flex-direction: column; padding: 0.8rem; }
+    .audio-controls { width: 100%; justify-content: space-between; }
+}
+
+.audio-controls button {
+    background: none;
+    border: none;
+    font-size: 1.8rem;
+    cursor: pointer;
+    color: #dbe4ff;
+    transition: 0.1s;
+    margin: 0 5px;
+}
+.audio-controls button:hover {
+    color: white;
+    transform: scale(1.05);
+}
+
+/* мини-обложка в плеере */
+.track-cover-mini {
+    width: 48px;
+    height: 48px;
+    border-radius: 8px;
+    object-fit: cover;
+    background: #1b1f32;
+    margin-right: 12px;
+}
+.now-playing {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* обложка трека в карточке */
+.track-cover-img {
+    width: 100%;
+    aspect-ratio: 1;
+    object-fit: cover;
+    border-radius: 24px;
+    margin-bottom: 1rem;
+}
+
+/* Стили для главной страницы (новости и скачивание) */
+.news-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 1.5rem;
+    margin: 1.5rem 0 2rem;
+}
+.news-card {
+    background: rgba(12, 20, 35, 0.7);
+    backdrop-filter: blur(10px);
+    border-radius: 24px;
+    padding: 1.2rem;
+    border: 1px solid rgba(110, 150, 255, 0.25);
+    transition: 0.2s;
+}
+.news-card:hover {
+    transform: translateY(-4px);
+    border-color: #7b6eff;
+}
+.news-date {
+    font-size: 0.75rem;
+    color: #9aaaff;
+    margin-bottom: 0.5rem;
+}
+.news-card h3 {
+    font-size: 1.2rem;
+    margin-bottom: 0.5rem;
+    color: #eef5ff;
+}
+.news-card p {
+    font-size: 0.9rem;
+    line-height: 1.4;
+    color: #cdd9ff;
+}
+.download-section {
+    margin: 2rem 0 3rem;
+    text-align: center;
+    padding: 1.5rem;
+    background: rgba(10, 20, 40, 0.5);
+    border-radius: 32px;
+    backdrop-filter: blur(8px);
+}
+.download-big {
+    font-size: 1.2rem;
+    padding: 1rem 2rem;
+    margin-top: 1rem;
+    display: inline-block;
+}
+.version-note {
+    margin-top: 1rem;
+    font-size: 0.7rem;
+    opacity: 0.6;
+}

@@ -11,7 +11,6 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtGui import QPalette, QColor
 
-from history_storage import HistoryStorage
 from models import Track, Playlist, TrackListModel, HistoryEntry, HistoryListModel
 from api import ServerAPI
 from player import AudioController
@@ -19,6 +18,7 @@ from widgets import (
     NavigationPanel, SearchBar, PlaybackControls, PlaylistView,
     RadioWidget, HistoryWidget, SimplePlaylistView
 )
+from history_storage import HistoryStorage
 
 
 class MainWindow(QMainWindow):
@@ -30,14 +30,14 @@ class MainWindow(QMainWindow):
 
         self.api = ServerAPI()
         self.audio_controller = AudioController()
-        self.track_model = TrackListModel()          # модель для главной страницы
+        self.track_model = TrackListModel()
         self.history_model = HistoryListModel()
         self.history_storage = HistoryStorage()
 
         self.current_playlist: Optional[Playlist] = None
         self.current_track_index: int = -1
         self.local_playlists: List[Playlist] = []
-        self.server_playlists: List[Playlist] = []   # кэш списка плейлистов с сервера
+        self.server_playlists: List[Playlist] = []
         self.likes_cache_path = Path("likes_cache.json")
         self.playlists_dir = Path("playlists")
         self.playlists_dir.mkdir(exist_ok=True)
@@ -46,11 +46,18 @@ class MainWindow(QMainWindow):
         self.current_track_liked = False
         self.current_track_disliked = False
 
-        self._load_history_from_db()
+        # Состояние радио
+        self.radio_active = False
+        self.radio_station = None
+        self.radio_last_id = None
+        self.radio_loading = False
+        self.radio_pending_next = False
+        self._pending_radio_stations = None
+
         self._setup_ui()
         self._connect_signals()
         self._load_local_playlists()
-        self.api.load_radio_stations()
+        self._load_history_from_db()
 
         self.update_timer = QTimer()
         self.update_timer.timeout.connect(self._update_ui)
@@ -58,9 +65,9 @@ class MainWindow(QMainWindow):
 
         self._check_auto_login()
 
-    # ------------------------------------------------------------------
+    # --------------------------------------------------------------
     # Кэширование понравившихся треков
-    # ------------------------------------------------------------------
+    # --------------------------------------------------------------
     def _save_likes_cache(self, tracks: List[Track]):
         data = [t.to_dict() for t in tracks]
         with open(self.likes_cache_path, 'w', encoding='utf-8') as f:
@@ -77,15 +84,16 @@ class MainWindow(QMainWindow):
             print(f"Failed to load likes cache: {e}")
             return None
 
-    # ------------------------------------------------------------------
+    # --------------------------------------------------------------
     # Инициализация и тема
-    # ------------------------------------------------------------------
+    # --------------------------------------------------------------
     def _check_auto_login(self):
         if self.api.access_token:
             self.auth_status = True
             self.nav_panel.set_login_status(True)
             self.status_bar.showMessage("Автоматический вход выполнен", 3000)
             QTimer.singleShot(500, self._load_likes_playlist)
+            self.api.get_radio_stations()
         else:
             self.auth_status = False
             self.nav_panel.set_login_status(False)
@@ -107,9 +115,9 @@ class MainWindow(QMainWindow):
         palette.setColor(QPalette.HighlightedText, Qt.black)
         self.setPalette(palette)
 
-    # ------------------------------------------------------------------
+    # --------------------------------------------------------------
     # Построение UI
-    # ------------------------------------------------------------------
+    # --------------------------------------------------------------
     def _setup_ui(self):
         central = QWidget()
         self.setCentralWidget(central)
@@ -166,7 +174,6 @@ class MainWindow(QMainWindow):
 
         # ----- История (индекс 2) -----
         self.history_widget = HistoryWidget(self.history_model)
-        self.history_widget.track_selected.connect(self._play_track_from_history)
         self.stacked.addWidget(self.history_widget)
 
         # ----- Серверные плейлисты (индекс 3) -----
@@ -212,9 +219,9 @@ class MainWindow(QMainWindow):
         self.setStatusBar(self.status_bar)
         self.status_bar.showMessage("Готов")
 
-    # ------------------------------------------------------------------
+    # --------------------------------------------------------------
     # Подключение сигналов
-    # ------------------------------------------------------------------
+    # --------------------------------------------------------------
     def _connect_signals(self):
         self.nav_panel.login_clicked.connect(self._toggle_login)
         self.nav_panel.home_clicked.connect(lambda: self.stacked.setCurrentIndex(0))
@@ -254,18 +261,37 @@ class MainWindow(QMainWindow):
         self.api.playlist_load_failed.connect(lambda msg: QMessageBox.warning(self, "Ошибка плейлиста", msg))
         self.api.like_status_changed.connect(self._on_like_status_changed)
         self.api.token_refreshed.connect(self._on_token_refreshed)
+        self.api.radio_tracks_loaded.connect(self._on_radio_tracks_loaded)
+        self.api.radio_load_failed.connect(lambda msg: QMessageBox.warning(self, "Ошибка радио", msg))
+        self.api.radio_stations_loaded.connect(self._on_radio_stations_loaded)
 
         self.playlist_view.list_view.setContextMenuPolicy(Qt.CustomContextMenu)
         self.playlist_view.list_view.customContextMenuRequested.connect(self._show_track_context_menu)
 
         self.likes_playlist_view.track_selected.connect(self._play_track_from_likes)
-
         self.history_widget.track_selected.connect(self._play_track_from_history)
         self.history_widget.clear_requested.connect(self.clear_history)
 
-    # ------------------------------------------------------------------
+    # --------------------------------------------------------------
+    # История
+    # --------------------------------------------------------------
+    def _load_history_from_db(self):
+        entries = self.history_storage.load_entries()
+        for entry in entries:
+            self.history_model.add_entry(entry)
+
+    def add_to_history(self, entry: HistoryEntry):
+        self.history_model.add_entry(entry)
+        self.history_storage.save_entry(entry)
+
+    def clear_history(self):
+        self.history_model.clear()
+        self.history_storage.clear_history()
+        self.status_bar.showMessage("История очищена", 2000)
+
+    # --------------------------------------------------------------
     # Обработчики плеера
-    # ------------------------------------------------------------------
+    # --------------------------------------------------------------
     def _on_track_changed(self, track: Track):
         info = (track.title, track.artist, track.cover_uri)
         self.playlist_view.set_current_track_info(*info)
@@ -275,6 +301,8 @@ class MainWindow(QMainWindow):
         self._update_like_buttons_ui()
 
     def _on_track_finished(self):
+        """Автоматическое переключение на следующий трек."""
+        print("Track finished, switching to next...")
         self._next_track()
 
     def _update_ui(self):
@@ -286,15 +314,16 @@ class MainWindow(QMainWindow):
         from PySide6.QtMultimedia import QMediaPlayer
         self.controls.set_playing_state(state == QMediaPlayer.PlayingState)
 
-    # ------------------------------------------------------------------
+    # --------------------------------------------------------------
     # Аутентификация
-    # ------------------------------------------------------------------
+    # --------------------------------------------------------------
     def _toggle_login(self):
         if self.auth_status:
             self.auth_status = False
             self.api.clear_tokens()
             self.nav_panel.set_login_status(False)
             self.status_bar.showMessage("Вы вышли из системы", 3000)
+            self._stop_radio()
         else:
             self._show_login_dialog()
 
@@ -325,13 +354,14 @@ class MainWindow(QMainWindow):
         QMessageBox.information(self, "Успех", "Вы вошли в систему")
         self._load_likes_playlist()
         self._load_server_playlists()
+        self.api.get_radio_stations()
 
     def _on_token_refreshed(self, access, refresh):
         self.status_bar.showMessage("Токен обновлён", 2000)
 
-    # ------------------------------------------------------------------
+    # --------------------------------------------------------------
     # Поиск и плейлисты
-    # ------------------------------------------------------------------
+    # --------------------------------------------------------------
     def _search_server(self, query):
         if not self.auth_status:
             QMessageBox.warning(self, "Требуется вход", "Сначала войдите в аккаунт")
@@ -340,14 +370,14 @@ class MainWindow(QMainWindow):
         self.api.search_tracks(query)
 
     def _on_search_finished(self, tracks: List[Track]):
+        self._stop_radio()
         self.status_bar.showMessage(f"Найдено треков: {len(tracks)}", 3000)
         if not tracks:
             QMessageBox.information(self, "Поиск", "Ничего не найдено")
             return
 
-        if self.track_model.rowCount() > 0:
-            for track in self.track_model.tracks():
-                self.add_to_history(HistoryEntry(track=track))
+        for track in self.track_model.tracks():
+            self.add_to_history(HistoryEntry(track=track))
 
         self.track_model.clear()
         for track in tracks:
@@ -358,6 +388,7 @@ class MainWindow(QMainWindow):
         self.current_track_index = -1
 
     def add_local_files(self):
+        self._stop_radio()
         files, _ = QFileDialog.getOpenFileNames(
             self, "Выберите аудиофайлы", "",
             "Аудио (*.mp3 *.wav *.ogg *.flac);;Все файлы (*.*)"
@@ -377,6 +408,7 @@ class MainWindow(QMainWindow):
             self.current_playlist.tracks = self.track_model.tracks()
 
     def clear_playlist(self):
+        self._stop_radio()
         if self.track_model.rowCount() > 0:
             for track in self.track_model.tracks():
                 self.add_to_history(HistoryEntry(track=track))
@@ -429,10 +461,10 @@ class MainWindow(QMainWindow):
                     break
 
     def _set_current_playlist(self, playlist: Playlist):
+        self._stop_radio()
         if self.track_model.rowCount() > 0:
             for track in self.track_model.tracks():
                 self.add_to_history(HistoryEntry(track=track))
-
         self.current_playlist = playlist
         self.track_model.clear()
         for track in playlist.tracks:
@@ -461,22 +493,30 @@ class MainWindow(QMainWindow):
         playlist = item.data(Qt.UserRole)
         if not playlist:
             return
+        self._stop_radio()
         self.status_bar.showMessage(f"Загрузка плейлиста '{playlist.name}'...")
         self.api.get_playlist_by_name(str(playlist.id))
 
+    # --------------------------------------------------------------
+    # Обработка загруженного плейлиста (включая лайки)
+    # --------------------------------------------------------------
     def _on_playlist_loaded(self, playlist: Playlist):
         self.status_bar.showMessage(f"Плейлист '{playlist.name}' загружен", 3000)
-        if playlist.name == "Понравившиеся" or playlist.id == -1:
+        is_likes = (playlist.id == -1 or
+                    "понравивш" in playlist.name.lower() or
+                    "like" in playlist.name.lower())
+        if is_likes:
             self.likes_model.clear()
             for track in playlist.tracks:
                 self.likes_model.addTrack(track)
             self._save_likes_cache(playlist.tracks)
+            self._set_current_playlist(playlist)
         else:
             self._set_current_playlist(playlist)
 
-    # ------------------------------------------------------------------
+    # --------------------------------------------------------------
     # Воспроизведение и навигация по трекам
-    # ------------------------------------------------------------------
+    # --------------------------------------------------------------
     def _play_track_at_index(self, index: int):
         if 0 <= index < self.track_model.rowCount():
             self.current_track_index = index
@@ -486,7 +526,28 @@ class MainWindow(QMainWindow):
     def _play_track_from_likes(self, index: int):
         if 0 <= index < self.likes_model.rowCount():
             track = self.likes_model.tracks()[index]
-            self._prepare_and_play_track(track)
+            if self.current_playlist is None or not (self.current_playlist.id == -1 or
+                                                     "понравивш" in self.current_playlist.name.lower()):
+                likes_playlist = Playlist(
+                    name="Понравившиеся",
+                    tracks=self.likes_model.tracks(),
+                    playlist_type="server",
+                    id=-1
+                )
+                self._stop_radio()
+                if self.track_model.rowCount() > 0:
+                    for old_track in self.track_model.tracks():
+                        self.add_to_history(HistoryEntry(track=old_track))
+                self.current_playlist = likes_playlist
+                self.track_model.clear()
+                for t in likes_playlist.tracks:
+                    self.track_model.addTrack(t)
+            try:
+                new_index = self.track_model.tracks().index(track)
+            except ValueError:
+                new_index = 0
+            self.current_track_index = new_index
+            self._play_track_at_index(self.current_track_index)
 
     def _play_track_from_history(self, track: Track):
         if track not in self.track_model.tracks():
@@ -503,9 +564,24 @@ class MainWindow(QMainWindow):
         self.likes_playlist_view.set_current_track_info(track.title, track.artist, track.cover_uri)
 
     def _next_track(self):
+        """Переключение на следующий трек в плейлисте."""
         if self.track_model.rowCount() == 0:
+            print("No tracks in playlist")
             return
-        self.current_track_index = (self.current_track_index + 1) % self.track_model.rowCount()
+
+        next_index = (self.current_track_index + 1) % self.track_model.rowCount()
+        print(f"Switching from index {self.current_track_index} to {next_index}")
+
+        if self.radio_active and next_index == 0:
+            if not self.radio_loading and self.radio_last_id is not None:
+                self.radio_pending_next = True
+                self._request_next_radio_batch()
+                return
+            elif self.radio_loading:
+                self.radio_pending_next = True
+                return
+
+        self.current_track_index = next_index
         self._play_track_at_index(self.current_track_index)
 
     def _prev_track(self):
@@ -514,9 +590,9 @@ class MainWindow(QMainWindow):
         self.current_track_index = (self.current_track_index - 1) % self.track_model.rowCount()
         self._play_track_at_index(self.current_track_index)
 
-    # ------------------------------------------------------------------
+    # --------------------------------------------------------------
     # Лайки / дизлайки
-    # ------------------------------------------------------------------
+    # --------------------------------------------------------------
     def _toggle_like(self):
         if not self.audio_controller.current_track or self.audio_controller.current_track.is_local:
             return
@@ -581,42 +657,84 @@ class MainWindow(QMainWindow):
             self._update_like_buttons_ui()
             QMessageBox.warning(self, "Ошибка", "Не удалось изменить оценку")
 
-    def _on_like_current_track(self):
-        self._toggle_like()
-
-    def _on_dislike_current_track(self):
-        self._toggle_dislike()
-
-    # ------------------------------------------------------------------
+    # --------------------------------------------------------------
     # Радио
-    # ------------------------------------------------------------------
+    # --------------------------------------------------------------
     def _show_radio_widget(self):
         if not hasattr(self, 'radio_widget'):
             self.radio_widget = RadioWidget()
             self.radio_widget.station_selected.connect(self._on_radio_station_selected)
             self.stacked.removeWidget(self.radio_placeholder)
             self.stacked.insertWidget(4, self.radio_widget)
+            if self._pending_radio_stations:
+                self.radio_widget.load_stations(self._pending_radio_stations)
         self.stacked.setCurrentIndex(4)
 
-    def _on_radio_stations_loaded(self, stations: list):
-        if hasattr(self, 'radio_widget'):
-            self.radio_widget.load_stations(stations)
+    def _stop_radio(self):
+        self.radio_active = False
+        self.radio_station = None
+        self.radio_last_id = None
+        self.radio_loading = False
+        self.radio_pending_next = False
+
+    def _request_next_radio_batch(self):
+        if not self.radio_active or self.radio_loading or self.radio_last_id is None:
+            return
+        self.radio_loading = True
+        self.api.get_radio_tracks(self.radio_station, self.radio_last_id)
+
+    def _on_radio_tracks_loaded(self, tracks: List[Track], last_id: Optional[int]):
+        if not self.radio_active:
+            return
+        if not tracks:
+            self.status_bar.showMessage("Больше треков нет", 3000)
+            self.radio_active = False
+            return
+
+        self.radio_last_id = last_id
+        current_count = self.track_model.rowCount()
+
+        if current_count == 0:
+            for track in tracks:
+                self.track_model.addTrack(track)
+            if self.track_model.rowCount() > 0:
+                self._play_track_at_index(0)
+        else:
+            for track in tracks:
+                self.track_model.addTrack(track)
+            if self.radio_pending_next:
+                self.radio_pending_next = False
+                self._next_track()
+
+        self.radio_loading = False
+        self.status_bar.showMessage(f"Радио: загружено {len(tracks)} треков", 2000)
 
     def _on_radio_station_selected(self, station: dict):
-        QMessageBox.information(self, "Радио", f"Выбрана станция: {station.get('name')}\n(функционал в разработке)")
+        tag = station.get("id") or station.get("name")
+        if not tag:
+            QMessageBox.warning(self, "Ошибка", "Неизвестная радиостанция")
+            return
 
-    def _load_history_from_db(self):
-        """Загружает историю из БД в модель."""
-        entries = self.history_storage.load_entries()
-        for entry in entries:
-            self.history_model.add_entry(entry)
+        if self.radio_active:
+            self._stop_radio()
 
-    def add_to_history(self, entry: HistoryEntry):
-        """Добавляет запись в модель и сохраняет в БД."""
-        self.history_model.add_entry(entry)
-        self.history_storage.save_entry(entry)
+        self.radio_active = True
+        self.radio_station = tag
+        self.radio_last_id = None
+        self.radio_loading = False
+        self.radio_pending_next = False
 
-    def clear_history(self):
-        """Очищает историю (модель + БД)."""
-        self.history_model.clear()
-        self.history_storage.clear_history()
+        self.track_model.clear()
+        self.current_playlist = None
+        self.current_track_index = -1
+
+        self.status_bar.showMessage(f"Загрузка радиостанции {station.get('name')}...")
+        self.api.get_radio_tracks(tag)
+
+        self.stacked.setCurrentIndex(0)
+
+    def _on_radio_stations_loaded(self, stations: List[str]):
+        if hasattr(self, 'radio_widget'):
+            self.radio_widget.load_stations(stations)
+        else:
+            self._pending_radio_stations = stations

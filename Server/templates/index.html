@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+    <title>NEBULA MUSIC — космический плеер</title>
+    <link rel="stylesheet" href="/static/CSS/style.css">
+</head>
+<body>
+<div class="stars" id="starsContainer"></div>
+
+<!-- ПРИВЕТСТВИЕ (только для неавторизованных) -->
+<div id="welcomePage" class="page active-page">
+    <div class="welcome-card">
+        <h1>🌌 NEBULA MUSIC</h1>
+        <p>Космическое звучание, любимые треки и радио без границ</p>
+        <div class="welcome-buttons">
+            <button class="btn btn-primary" id="welcomeLoginBtn">🚀 Войти</button>
+            <button class="btn btn-outline" id="welcomeRegisterBtn">✨ Регистрация</button>
+        </div>
+    </div>
+</div>
+
+<!-- МОДАЛКИ АВТОРИЗАЦИИ -->
+<div id="loginModal" class="modal">
+    <div class="modal-card">
+        <h3>🚀 Вход</h3>
+        <input type="text" id="loginUsername" placeholder="Логин">
+        <input type="password" id="loginPassword" placeholder="Пароль">
+        <button class="btn btn-primary" id="submitLoginBtn">Войти</button>
+        <div id="loginMessage" class="message"></div>
+    </div>
+</div>
+<div id="registerModal" class="modal">
+    <div class="modal-card">
+        <h3>🌟 Регистрация</h3>
+        <input type="text" id="regUsername" placeholder="Логин">
+        <input type="password" id="regPassword" placeholder="Пароль">
+        <button class="btn btn-primary" id="submitRegisterBtn">Зарегистрироваться</button>
+        <div id="regMessage" class="message"></div>
+    </div>
+</div>
+
+<!-- ОСНОВНОЕ ПРИЛОЖЕНИЕ (после входа) -->
+<div id="mainApp" class="main-interface">
+    <div class="navbar">
+        <div class="logo">🌌 NEBULA MUSIC</div>
+        <div class="nav-links">
+            <button class="nav-link" data-page="home">🏠 Главная</button>
+            <button class="nav-link" data-page="likes">❤️ Понравилось</button>
+            <button class="nav-link" data-page="radio">📻 Радио</button>
+            <button class="nav-link logout-btn" id="logoutMainBtn">🚪 Выйти</button>
+        </div>
+    </div>
+
+    <!-- ГЛАВНАЯ СТРАНИЦА (новости + скачивание) -->
+    <div id="homePage" class="page">
+        <h2 class="section-title">🚀 Новости разработки</h2>
+        <div class="news-grid" id="newsContainer">
+            <!-- новости будут загружаться или статические -->
+            <div class="news-card">
+                <div class="news-date">07 мая 2025</div>
+                <h3>✨ Релиз космического плеера Nebula</h3>
+                <p>Представляем первую версию плеера с поддержкой потокового радио, лайков и персональных плейлистов. Приятного прослушивания!</p>
+            </div>
+            <div class="news-card">
+                <div class="news-date">01 мая 2025</div>
+                <h3>📻 Добавлены радиостанции</h3>
+                <p>Теперь доступно более 10 жанровых радиостанций: рок, поп, электроника, джаз и другие. Слушайте любимые треки без перерыва.</p>
+            </div>
+            <div class="news-card">
+                <div class="news-date">25 апреля 2025</div>
+                <h3>🎵 ПК-версия в разработке</h3>
+                <p>Десктопное приложение на Qt позволит наслаждаться музыкой даже без браузера. Скачайте бета-версию по кнопке ниже.</p>
+            </div>
+        </div>
+
+        <!-- Блок скачивания ПК-версии -->
+        <div class="download-section">
+            <h2 class="section-title">💾 Скачать приложение для ПК</h2>
+            <p>Полноценный плеер с расширенными возможностями: поддержка локальных файлов, офлайн-режим, системные горячие клавиши.</p>
+            <a href="#" id="downloadPcBtn" class="btn btn-primary download-big">📀 Скачать Nebula Player (Windows/macOS)</a>
+            <div class="version-note">Версия 0.9.2-beta | 85 МБ</div>
+        </div>
+    </div>
+
+    <!-- СТРАНИЦА "ПОНРАВИВШИЕСЯ ТРЕКИ" -->
+    <div id="likesPage" class="page">
+        <h2 class="section-title">✨ Ваши любимые треки</h2>
+        <div class="grid" id="tracksGrid"></div>
+    </div>
+
+    <!-- СТРАНИЦА "РАДИО" -->
+    <div id="radioPage" class="page">
+        <h2 class="section-title">📡 Космические волны</h2>
+        <div class="grid" id="radioGrid"></div>
+    </div>
+</div>
+
+<!-- ПЛЕЕР -->
+<div id="playerBar" class="player-bar" style="display: none;">
+    <div class="now-playing">
+        <img id="trackCover" class="track-cover-mini" alt="cover" src="">
+        <div class="now-playing-info">
+            <div id="nowTrackTitle">Не выбрано</div>
+            <div id="nowTrackArtist" style="font-size:0.7rem;">—</div>
+        </div>
+    </div>
+    <div class="audio-controls">
+        <button id="prevTrackBtn" title="Предыдущий трек">⏮️</button>
+        <button id="playPauseBtn">▶️</button>
+        <button id="nextTrackBtn" title="Следующий трек">⏭️</button>
+        <span class="time" id="currentTime">0:00</span>
+        <progress id="progressSlider" value="0" max="100"></progress>
+        <span class="time" id="duration">0:00</span>
+        <input type="range" id="volumeSlider" class="volume-slider" min="0" max="100" value="70">
+    </div>
+</div>
+
+<script src="/static/JS/app.js"></script>
+</body>
+</html>

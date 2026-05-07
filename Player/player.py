@@ -44,7 +44,7 @@ class AudioController(QObject):
 
     def play_track(self, track: Track):
         self.player.stop()
-        self.player.setSource(QUrl())   # Сброс источника
+        self.player.setSource(QUrl())
         self.current_track = track
         if track.is_local:
             url = QUrl.fromLocalFile(track.url)

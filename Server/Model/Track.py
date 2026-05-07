@@ -40,11 +40,11 @@ class Playlist(Base):
 
 class RadioStart(Base):
     Station: str
-    Queue: str | int | None = None
+    LastIdTrack: str | int | None = None
 
 class RadioResponse(Base):
     Tracks: list[Track]
-    BatchId: str
+    LastIdTrack: str | int | None = None
 
 
 class FeedBack(Base):
