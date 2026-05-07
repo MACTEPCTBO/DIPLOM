@@ -52,4 +52,4 @@ if __name__ == "__main__":
     SUPABASE_URL = os.getenv("SUPABASE_URL")
     SUPABASE_KEY = os.getenv("SUPABASE_PRIVATE_KEY")
 
-    uvicorn.run(app, host=IP, port=PORT)
+    uvicorn.run(app, host='0.0.0.0')
